@@ -1,0 +1,102 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+import joblib
+
+# Load Data
+data = pd.read_csv(r"C:\Users\M Swathi\Downloads\GRF_IMU_data.csv")
+
+# Convert categorical variables
+data['Sub'] = data['Sub'].astype('category')
+data['IsFemale'] = data['IsFemale'].astype('category')
+
+# Split Data
+np.random.seed(541)
+male_data = data[data['IsFemale'] == 0]
+female_data = data[data['IsFemale'] == 1]
+
+# Ensure test_size is appropriate for stratification
+def adjusted_test_size(data_subset):
+    unique_classes = len(data_subset['Sub'].unique())
+    min_test_size = max(0.2, unique_classes / len(data_subset))
+    return min_test_size if min_test_size * len(data_subset) >= unique_classes else unique_classes / len(data_subset)
+
+test_size_male = adjusted_test_size(male_data)
+test_size_female = adjusted_test_size(female_data)
+
+if len(male_data['Sub'].unique()) > 1 and test_size_male * len(male_data) >= len(male_data['Sub'].unique()):
+    train_male, test_male = train_test_split(male_data, test_size=test_size_male, stratify=male_data['Sub'])
+else:
+    train_male, test_male = train_test_split(male_data, test_size=test_size_male)
+
+if len(female_data['Sub'].unique()) > 1 and test_size_female * len(female_data) >= len(female_data['Sub'].unique()):
+    train_female, test_female = train_test_split(female_data, test_size=test_size_female, stratify=female_data['Sub'])
+else:
+    train_female, test_female = train_test_split(female_data, test_size=test_size_female)
+
+train_data = pd.concat([train_male, train_female])
+test_data = pd.concat([test_male, test_female])
+
+# Define features and target columns
+features = ['Speed', 'IMUPeak', 'Mass', 'IMUsf']
+X_train, X_test = train_data[features], test_data[features]
+Y_train_peak, Y_test_peak = train_data['GRFPeak'], test_data['GRFPeak']
+Y_train_impulse, Y_test_impulse = train_data['GRFImpulse'], test_data['GRFImpulse']
+Y_train_tc, Y_test_tc = train_data['GRFtc'], test_data['GRFtc']
+
+# Train Linear Regression Models
+lm_peak = LinearRegression().fit(X_train, Y_train_peak)
+lm_impulse = LinearRegression().fit(X_train, Y_train_impulse)
+lm_tc = LinearRegression().fit(X_train, Y_train_tc)
+
+# Train Random Forest Models
+rf_peak = RandomForestRegressor(n_estimators=100, random_state=541).fit(X_train, Y_train_peak)
+rf_impulse = RandomForestRegressor(n_estimators=100, random_state=541).fit(X_train, Y_train_impulse)
+rf_tc = RandomForestRegressor(n_estimators=100, random_state=541).fit(X_train, Y_train_tc)
+
+# Evaluate Models
+def evaluate_model(model, X_test, Y_test):
+    predictions = model.predict(X_test)
+    return {
+        'RMSE': np.sqrt(mean_squared_error(Y_test, predictions)),
+        'R^2': r2_score(Y_test, predictions),
+        'MAE': mean_absolute_error(Y_test, predictions)
+    }
+
+# Get results for each model
+lm_results_peak = evaluate_model(lm_peak, X_test, Y_test_peak)
+lm_results_impulse = evaluate_model(lm_impulse, X_test, Y_test_impulse)
+lm_results_tc = evaluate_model(lm_tc, X_test, Y_test_tc)
+
+rf_results_peak = evaluate_model(rf_peak, X_test, Y_test_peak)
+rf_results_impulse = evaluate_model(rf_impulse, X_test, Y_test_impulse)
+rf_results_tc = evaluate_model(rf_tc, X_test, Y_test_tc)
+
+# Store results
+model_performance = pd.DataFrame({
+    'Model': ['Linear Regression'] * 3 + ['Random Forest'] * 3,
+    'Metric': ['Peak vGRF', 'Vertical Impulse', 'Contact Time'] * 2,
+    'RMSE': [
+        lm_results_peak['RMSE'], lm_results_impulse['RMSE'], lm_results_tc['RMSE'],
+        rf_results_peak['RMSE'], rf_results_impulse['RMSE'], rf_results_tc['RMSE']
+    ],
+    'R^2': [
+        lm_results_peak['R^2'], lm_results_impulse['R^2'], lm_results_tc['R^2'],
+        rf_results_peak['R^2'], rf_results_impulse['R^2'], rf_results_tc['R^2']
+    ],
+    'MAE': [
+        lm_results_peak['MAE'], lm_results_impulse['MAE'], lm_results_tc['MAE'],
+        rf_results_peak['MAE'], rf_results_impulse['MAE'], rf_results_tc['MAE']
+    ]
+})
+# Save models
+joblib.dump(lm_peak, 'linear_regression_model.pkl')
+joblib.dump(rf_peak, 'random_forest_model.pkl')
+
+print("Models saved successfully!")
+print(model_performance)
+
+
